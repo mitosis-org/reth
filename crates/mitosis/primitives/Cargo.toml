@@ -1,0 +1,30 @@
+[package]
+name = "reth-mitosis-primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Mitosis primitives"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-chainspec.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-rlp.workspace = true
+
+# serde
+serde = { workspace = true, features = ["derive"] }
+
+# misc
+thiserror.workspace = true
+hex = "0.4"
+tracing.workspace = true
