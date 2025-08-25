@@ -38,11 +38,10 @@ where
     type Evm = Inner::Evm;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        // First apply the inner pre-execution changes
-
+        // Apply the inner pre-execution changes
         self.inner.apply_pre_execution_changes()?;
         
-        // Deploy Multicall3 contract using system transaction at block 150
+        // Deploy Multicall3 contract using system transaction at the specific chain id and block number (hardfork)
         apply_multicall3_deployment(self.inner.evm_mut())?;
         
         Ok(())

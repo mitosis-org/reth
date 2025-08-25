@@ -10,10 +10,10 @@ use revm::{
     Database, DatabaseCommit,
 };
 use reth_mitosis_primitives::{
-    CONTRACT_REPLACEMENT_BLOCK, MULTICALL3_ADDRESS, get_multicall3_bytecode
+    MULTICALL3_REPLACEMENT_BLOCK, MULTICALL3_HARDFORK_CHAIN_ID, MULTICALL3_ADDRESS, get_multicall3_bytecode
 };
 
-/// Deploys the Multicall3 contract at block 150 by directly modifying the state.
+/// Deploys the Multicall3 contract at the specific chain id and block number by directly modifying the state.
 ///
 /// This function properly loads the account into the cache first, then modifies it
 /// to ensure REVM's cache consistency requirements are met.
@@ -25,9 +25,17 @@ where
     E: Evm<HaltReason = Halt> + ?Sized,
     E::DB: Database + DatabaseCommit,
 {
+    // Only deploy at the specific chain id
+    // TODO: This is a temporary solution to ensure the Multicall3 contract is deployed at the correct chain id
+    // We should implement a correct hardfork logic
+    let chain_id = evm.chain_id();
+    if chain_id != MULTICALL3_HARDFORK_CHAIN_ID {
+        return Ok(());
+    }
+
     // Only deploy at the specific block
     let block_number = evm.block().number.saturating_to::<u64>();
-    if block_number != CONTRACT_REPLACEMENT_BLOCK {
+    if block_number != MULTICALL3_REPLACEMENT_BLOCK {
         return Ok(());
     }
 
@@ -45,7 +53,7 @@ where
     
     // Create the account info with the bytecode
     let account_info = AccountInfo {
-        balance: U256::ZERO,
+        balance: _existing_account.map(|acc| acc.balance).unwrap_or(U256::ZERO),
         nonce: 1, // Contract nonce (1 indicates it's a contract)
         code_hash: keccak256(&bytecode),
         code: Some(Bytecode::new_raw(bytecode)),

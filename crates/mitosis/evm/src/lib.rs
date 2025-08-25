@@ -36,7 +36,6 @@ use reth_ethereum::{
     EthPrimitives,
 };
 use reth_chainspec::ChainSpec;
-use reth_mitosis_primitives::CONTRACT_REPLACEMENT_BLOCK;
 
 /// Mitosis EVM configuration factory.
 ///
@@ -57,15 +56,6 @@ impl EvmFactory for MitosisEvmFactory {
     type Precompiles = PrecompilesMap;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
-        // Check if we need to pre-load Multicall3 for block 150
-        let block_number = input.block_env.number.saturating_to::<u64>();
-        
-        if block_number == CONTRACT_REPLACEMENT_BLOCK {
-            // Pre-initialize the Multicall3 contract in the database
-            // Note: This requires the database to have the account pre-loaded
-            // The actual insertion happens at the state provider level
-        }
-        
         let evm = Context::mainnet()
             .with_db(db)
             .with_cfg(input.cfg_env)
