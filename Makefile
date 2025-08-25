@@ -55,6 +55,13 @@ install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
 
+.PHONY: install-mi-reth
+install-mi: ## Build and install the mi-reth binary under `~/.cargo/bin`.
+	cargo install --path bin/mitosis --bin mi-reth --force --locked \
+		--features "$(FEATURES)" \
+		--profile "$(PROFILE)" \
+		$(CARGO_INSTALL_EXTRA_FLAGS)
+
 .PHONY: build
 build: ## Build the reth binary into `target` directory.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
@@ -96,12 +103,19 @@ build-debug: ## Build the reth binary into `target/debug` directory.
 build-op: ## Build the op-reth binary into `target` directory.
 	cargo build --bin op-reth --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
+.PHONY: build-mi
+build-mi: ## Build the mi-reth binary into `target` directory.
+	cargo build --bin mi-reth --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path bin/mitosis/Cargo.toml
+
 # Builds the reth binary natively.
 build-native-%:
 	cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 op-build-native-%:
 	cargo build --bin op-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
+
+mi-build-native-%:
+	cargo build --bin mi-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path bin/mitosis/Cargo.toml
 
 # The following commands use `cross` to build a cross-compile.
 #
@@ -135,6 +149,10 @@ op-build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
 		cross build --bin op-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
+mi-build-%:
+	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
+		cross build --bin mi-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path bin/mitosis/Cargo.toml
+
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
 #
@@ -149,6 +167,10 @@ op-build-x86_64-apple-darwin:
 	$(MAKE) op-build-native-x86_64-apple-darwin
 op-build-aarch64-apple-darwin:
 	$(MAKE) op-build-native-aarch64-apple-darwin
+mi-build-x86_64-apple-darwin:
+	$(MAKE) mi-reth-build-native-x86_64-apple-darwin
+mi-build-aarch64-apple-darwin:
+	$(MAKE) mi-reth-build-native-aarch64-apple-darwin
 
 # Create a `.tar.gz` containing a binary for a specific target.
 define tarball_release_binary
@@ -378,6 +400,10 @@ profiling: ## Builds `reth` with optimisations, but also symbols.
 profiling-op: ## Builds `op-reth` with optimisations, but also symbols.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features jemalloc,asm-keccak --bin op-reth --manifest-path crates/optimism/bin/Cargo.toml
 
+.PHONY: profiling-mi-reth
+profiling-mi: ## Builds `mi-reth` with optimisations, but also symbols.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features jemalloc,asm-keccak --bin mi-reth --manifest-path bin/mitosis/Cargo.toml
+
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
@@ -385,6 +411,10 @@ maxperf: ## Builds `reth` with the most aggressive optimisations.
 .PHONY: maxperf-op
 maxperf-op: ## Builds `op-reth` with the most aggressive optimisations.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak --bin op-reth --manifest-path crates/optimism/bin/Cargo.toml
+
+.PHONY: maxperf-mi-reth
+maxperf-mi: ## Builds `mi-reth` with the most aggressive optimisations.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak --bin mi-reth --manifest-path bin/mitosis/Cargo.toml
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.

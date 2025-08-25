@@ -5611,6 +5611,60 @@ dependencies = [
 ]
 
 [[package]]
+name = "mi-reth"
+version = "1.6.0"
+dependencies = [
+ "alloy-evm",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types",
+ "aquamarine",
+ "backon",
+ "clap",
+ "eyre",
+ "reth-chainspec",
+ "reth-cli-runner",
+ "reth-cli-util",
+ "reth-consensus",
+ "reth-consensus-common",
+ "reth-db",
+ "reth-ethereum",
+ "reth-ethereum-cli",
+ "reth-ethereum-payload-builder",
+ "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-mitosis-evm",
+ "reth-mitosis-primitives",
+ "reth-network",
+ "reth-network-api",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-node-metrics",
+ "reth-payload-builder",
+ "reth-payload-primitives",
+ "reth-primitives",
+ "reth-provider",
+ "reth-ress-protocol",
+ "reth-ress-provider",
+ "reth-revm",
+ "reth-rpc",
+ "reth-rpc-api",
+ "reth-rpc-builder",
+ "reth-rpc-convert",
+ "reth-rpc-eth-types",
+ "reth-rpc-server-types",
+ "reth-tasks",
+ "reth-tokio-util",
+ "reth-transaction-pool",
+ "tempfile",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8599,6 +8653,45 @@ dependencies = [
  "metrics-derive",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "reth-mitosis-evm"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
+ "alloy-primitives",
+ "eyre",
+ "reth-chainspec",
+ "reth-ethereum",
+ "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-execution-types",
+ "reth-mitosis-primitives",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-rpc-server-types",
+ "reth-storage-api",
+ "reth-storage-errors",
+ "reth-trie",
+ "revm",
+]
+
+[[package]]
+name = "reth-mitosis-primitives"
+version = "1.6.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
+ "hex",
+ "reth-chainspec",
+ "reth-primitives",
+ "serde",
+ "thiserror 2.0.12",
+ "tracing",
 ]
 
 [[package]]
