@@ -1523,8 +1523,6 @@ where
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
-                                let _cache_wait =
-                                    self.payload_validator.wait_for_execution_cache();
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
