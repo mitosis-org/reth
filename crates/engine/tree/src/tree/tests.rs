@@ -928,8 +928,8 @@ async fn test_get_canonical_blocks_to_persist() {
     assert!(!blocks_to_persist.iter().any(|b| b.recovered_block().hash() == fork_block_hash));
 
     // check that the original block 4 is still included
-    assert!(blocks_to_persist.iter().any(|b| b.recovered_block().number == 4 &&
-        b.recovered_block().hash() == blocks[4].recovered_block().hash()));
+    assert!(blocks_to_persist.iter().any(|b| b.recovered_block().number == 4
+        && b.recovered_block().hash() == blocks[4].recovered_block().hash()));
 
     // check that if we advance persistence, the persistence action is the correct value
     test_harness.tree.advance_persistence().expect("advancing persistence should succeed");
@@ -1940,6 +1940,28 @@ mod forkchoice_updated_tests {
         // method
         let result = test_harness.tree.check_invalid_ancestor(invalid_block_hash).unwrap();
         assert!(result.is_some(), "Should detect invalid ancestor");
+    }
+
+    #[tokio::test]
+    async fn test_fcu_drops_stale_invalid_ancestor_for_known_block() {
+        let chain_spec = MAINNET.clone();
+        let mut test_harness = TestHarness::new(chain_spec.clone());
+        let blocks: Vec<_> = test_harness.block_builder.get_executed_blocks(0..3).collect();
+        let known_block = blocks.last().unwrap().recovered_block().num_hash();
+
+        test_harness = test_harness.with_blocks(blocks);
+        test_harness
+            .tree
+            .state
+            .invalid_headers
+            .insert(BlockWithParent { block: known_block, parent: B256::ZERO });
+
+        let result = test_harness.tree.check_invalid_ancestor(known_block.hash).unwrap();
+        assert!(result.is_none(), "accepted blocks should ignore stale invalid-header entries");
+        assert!(
+            test_harness.tree.state.invalid_headers.get(&known_block.hash).is_none(),
+            "stale invalid-header entry should be removed"
+        );
     }
 
     /// Test `OpStack` specific behavior with canonical head
