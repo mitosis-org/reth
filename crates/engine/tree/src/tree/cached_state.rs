@@ -303,23 +303,12 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
 impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvider<S, PREWARM> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if PREWARM {
-            if let Some(account) = self.caches.0.account_cache.get(address) {
-                self.metrics.account_cache_hits.increment(1);
-                return Ok(account)
-            }
-
+            // Speculative prewarm execution must not consume or populate the shared account cache.
+            // Account nonce/balance is stateful across transactions and sibling payloads; reading
+            // or writing it from prewarm can surface stale empty-account semantics during the real
+            // sequential execution path.
             self.metrics.account_cache_misses.increment(1);
-            let account = self.state_provider.basic_account(address)?;
-
-            // Do not cache missing accounts across payloads. A speculative prewarm lookup can
-            // race with state becoming visible for the canonical parent, and persisting `None`
-            // here can later surface as false-invalid empty-account semantics.
-            if let Some(account) = account {
-                self.caches.insert_account(*address, Some(account));
-                return Ok(Some(account))
-            }
-
-            Ok(None)
+            self.state_provider.basic_account(address)
         } else if let Some(account) = self.caches.0.account_cache.get(address) {
             self.metrics.account_cache_hits.increment(1);
             Ok(account)
@@ -913,6 +902,23 @@ mod tests {
 
         let second = state_provider.basic_account(&address).unwrap();
         assert_eq!(second.map(|account| account.nonce), Some(6795));
+    }
+
+    #[test]
+    fn test_prewarm_ignores_stale_shared_account_cache() {
+        let address = Address::random();
+        let provider = MockEthProvider::default();
+        provider.add_account(address, ExtendedAccount::new(7, U256::from(1_000_000u64)));
+
+        let caches = ExecutionCache::new(1000);
+        caches.insert_account(address, Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }));
+
+        let state_provider =
+            CachedStateProvider::new_prewarm(provider, caches, CachedStateMetrics::zeroed());
+
+        let account = state_provider.basic_account(&address).unwrap().unwrap();
+        assert_eq!(account.nonce, 7);
+        assert_eq!(account.balance, U256::from(1_000_000u64));
     }
 
     #[test]
