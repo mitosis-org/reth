@@ -527,32 +527,11 @@ where
     /// instance.
     #[instrument(level = "debug", target = "engine::caching", skip(self))]
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
-        if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
-            debug!("reusing execution cache");
-            return cache;
-        }
-
-        if self.execution_cache.has_busy_cache_for(parent_hash) {
-            debug!(
-                target: "engine::caching",
-                %parent_hash,
-                "waiting for busy execution cache that matches parent hash"
-            );
-            let wait = self.execution_cache.wait_for_availability();
-            debug!(
-                target: "engine::caching",
-                %parent_hash,
-                ?wait,
-                "retrying execution cache lookup after wait"
-            );
-
-            if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
-                debug!("reusing execution cache after waiting for cache save to complete");
-                return cache;
-            }
-        }
-
-        debug!("creating new execution cache on cache miss");
+        debug!(
+            target: "engine::caching",
+            %parent_hash,
+            "cross-block execution cache reuse disabled for correctness"
+        );
         let start = Instant::now();
         let cache = ExecutionCache::new(self.cross_block_cache_size);
         let metrics = CachedStateMetrics::zeroed();
@@ -712,42 +691,12 @@ where
         block_with_parent: BlockWithParent,
         bundle_state: &BundleState,
     ) {
-        let disable_cache_metrics = self.disable_cache_metrics;
-        self.execution_cache.update_with_guard(|cached| {
-            if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
-                debug!(
-                    target: "engine::caching",
-                    parent_hash = %block_with_parent.parent,
-                    "Cannot find cache for parent hash, skip updating cache with new state for inserted executed block",
-                );
-                return
-            }
-
-            // Take existing cache (if any) or create fresh caches
-            let (caches, cache_metrics, _) = match cached.take() {
-                Some(existing) => existing.split(),
-                None => (
-                    ExecutionCache::new(self.cross_block_cache_size),
-                    CachedStateMetrics::zeroed(),
-                    false,
-                ),
-            };
-
-            // Insert the block's bundle state into cache
-            let new_cache =
-                SavedCache::new(block_with_parent.block.hash, caches, cache_metrics)
-                    .with_disable_cache_metrics(disable_cache_metrics);
-            if new_cache.cache().insert_state(bundle_state).is_err() {
-                *cached = None;
-                debug!(target: "engine::caching", "cleared execution cache on update error");
-                return
-            }
-            new_cache.update_metrics();
-
-            // Replace with the updated cache
-            *cached = Some(new_cache);
-            debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
-        });
+        let _ = bundle_state;
+        debug!(
+            target: "engine::caching",
+            ?block_with_parent,
+            "skipping execution cache update for inserted block because cross-block reuse is disabled"
+        );
     }
 }
 
@@ -1210,7 +1159,7 @@ mod tests {
     }
 
     #[test]
-    fn on_inserted_executed_block_populates_cache() {
+    fn on_inserted_executed_block_does_not_publish_shared_cache() {
         let payload_processor = PayloadProcessor::new(
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
@@ -1229,17 +1178,17 @@ mod tests {
         // Cache should be empty initially
         assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
 
-        // Update cache with inserted block
+        // Inserted blocks should not publish shared execution cache when cross-block reuse
+        // is disabled for correctness.
         payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
-        // Cache should now exist for the block hash
+        // Cache should still be absent for the block hash.
         let cached = payload_processor.execution_cache.get_cache_for(block_hash);
-        assert!(cached.is_some());
-        assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
+        assert!(cached.is_none());
     }
 
     #[test]
-    fn on_inserted_executed_block_skips_on_parent_mismatch() {
+    fn on_inserted_executed_block_preserves_existing_cache_without_publishing_new_one() {
         let payload_processor = PayloadProcessor::new(
             reth_tasks::Runtime::test(),
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
@@ -1253,7 +1202,8 @@ mod tests {
             .execution_cache
             .update_with_guard(|slot| *slot = Some(make_saved_cache(block1_hash)));
 
-        // Try to insert block 3 with wrong parent (should skip and keep block 1's cache)
+        // Insert a later block; with cross-block reuse disabled this should not modify the
+        // existing shared cache, regardless of parent relationship.
         let wrong_parent = B256::from([99u8; 32]);
         let block3_hash = B256::from([3u8; 32]);
         let block_with_parent = BlockWithParent {
@@ -1264,13 +1214,13 @@ mod tests {
 
         payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
 
-        // Cache should still be for block 1 (unchanged)
+        // Existing cache should remain untouched.
         let cached = payload_processor.execution_cache.get_cache_for(block1_hash);
         assert!(cached.is_some(), "Original cache should be preserved");
 
-        // Cache for block 3 should not exist
+        // No cache should be published for the inserted block.
         let cached3 = payload_processor.execution_cache.get_cache_for(block3_hash);
-        assert!(cached3.is_none(), "New block cache should not be created on mismatch");
+        assert!(cached3.is_none(), "Inserted block cache should not be published");
     }
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
