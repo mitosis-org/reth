@@ -527,16 +527,36 @@ where
     fn cache_for(&self, parent_hash: B256) -> SavedCache {
         if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
             debug!("reusing execution cache");
-            cache
-        } else {
-            debug!("creating new execution cache on cache miss");
-            let start = Instant::now();
-            let cache = ExecutionCache::new(self.cross_block_cache_size);
-            let metrics = CachedStateMetrics::zeroed();
-            metrics.record_cache_creation(start.elapsed());
-            SavedCache::new(parent_hash, cache, metrics)
-                .with_disable_cache_metrics(self.disable_cache_metrics)
+            return cache;
         }
+
+        if self.execution_cache.has_busy_cache_for(parent_hash) {
+            debug!(
+                target: "engine::caching",
+                %parent_hash,
+                "waiting for busy execution cache that matches parent hash"
+            );
+            let wait = self.execution_cache.wait_for_availability();
+            debug!(
+                target: "engine::caching",
+                %parent_hash,
+                ?wait,
+                "retrying execution cache lookup after wait"
+            );
+
+            if let Some(cache) = self.execution_cache.get_cache_for(parent_hash) {
+                debug!("reusing execution cache after waiting for cache save to complete");
+                return cache;
+            }
+        }
+
+        debug!("creating new execution cache on cache miss");
+        let start = Instant::now();
+        let cache = ExecutionCache::new(self.cross_block_cache_size);
+        let metrics = CachedStateMetrics::zeroed();
+        metrics.record_cache_creation(start.elapsed());
+        SavedCache::new(parent_hash, cache, metrics)
+            .with_disable_cache_metrics(self.disable_cache_metrics)
     }
 
     /// Spawns the [`SparseTrieCacheTask`] for this payload processor.
@@ -1038,7 +1058,7 @@ impl PayloadExecutionCache {
                     // and picking up polluted data if the fork block fails.
                     c.clear_with_hash(parent_hash);
                 }
-                return Some(c.clone())
+                return Some(c.clone());
             } else if hash_matches {
                 self.metrics.execution_cache_in_use.increment(1);
             }
@@ -1047,6 +1067,14 @@ impl PayloadExecutionCache {
         }
 
         None
+    }
+
+    /// Returns true if the shared cache matches `parent_hash` but is currently in use.
+    pub(crate) fn has_busy_cache_for(&self, parent_hash: B256) -> bool {
+        let cache = self.inner.read();
+        cache.as_ref().is_some_and(|cache| {
+            cache.executed_block_hash() == parent_hash && !cache.is_available()
+        })
     }
 
     /// Waits until the execution cache becomes available for use.

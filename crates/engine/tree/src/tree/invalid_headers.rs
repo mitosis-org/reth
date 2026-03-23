@@ -42,7 +42,7 @@ impl InvalidHeaderCache {
             let entry = self.headers.get(hash)?;
             entry.hit_count += 1;
             if entry.hit_count < INVALID_HEADER_HIT_EVICTION_THRESHOLD {
-                return Some(entry.header)
+                return Some(entry.header);
             }
         }
         // if we get here, the entry has been hit too many times, so we evict it
@@ -50,6 +50,15 @@ impl InvalidHeaderCache {
         self.metrics.hit_evictions.increment(1);
         self.metrics.count.set(self.headers.len() as f64);
         None
+    }
+
+    /// Removes an invalid header entry from the cache.
+    pub fn remove(&mut self, hash: &B256) -> Option<BlockWithParent> {
+        let removed = self.headers.remove(hash).map(|entry| entry.header);
+        if removed.is_some() {
+            self.metrics.count.set(self.headers.len() as f64);
+        }
+        removed
     }
 
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
@@ -121,6 +130,18 @@ mod tests {
             assert_eq!(cache.headers.get(&header.hash()).unwrap().hit_count, hit);
         }
 
+        assert!(cache.get(&header.hash()).is_none());
+    }
+
+    #[test]
+    fn test_remove_updates_cache() {
+        let mut cache = InvalidHeaderCache::new(10);
+        let header = Header::default();
+        let header = SealedHeader::seal_slow(header);
+        cache.insert(header.block_with_parent());
+
+        let removed = cache.remove(&header.hash());
+        assert!(removed.is_some());
         assert!(cache.get(&header.hash()).is_none());
     }
 }
