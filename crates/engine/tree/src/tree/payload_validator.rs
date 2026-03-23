@@ -1211,6 +1211,14 @@ where
         hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<StateProviderBuilder<N, P>>> {
+        // Prefer persisted canonical state when it is already available in the database. The
+        // in-memory overlay path is more complex and is a stronger suspect for false-invalid
+        // payloads under storage-v2 sync.
+        if let Some(header) = self.provider.header(hash)? {
+            debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+        }
+
         if let Some((historical, blocks)) = state.tree_state.blocks_by_hash(hash) {
             debug!(target: "engine::tree::payload_validator", %hash, %historical, "found canonical state for block in memory, creating provider builder");
             // the block leads back to the canonical chain
@@ -1219,14 +1227,6 @@ where
                 historical,
                 Some(blocks),
             )))
-        }
-
-        // Check if the block is persisted
-        if let Some(header) = self.provider.header(hash)? {
-            debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
-            // For persisted blocks, we create a builder that will fetch state directly from the
-            // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
         }
 
         debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
