@@ -303,11 +303,23 @@ impl<K: PartialEq, V> StatsHandler<K, V> for CacheStatsHandler {
 impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvider<S, PREWARM> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if PREWARM {
-            match self.caches.get_or_try_insert_account_with(*address, || {
-                self.state_provider.basic_account(address)
-            })? {
-                CachedStatus::NotCached(value) | CachedStatus::Cached(value) => Ok(value),
+            if let Some(account) = self.caches.0.account_cache.get(address) {
+                self.metrics.account_cache_hits.increment(1);
+                return Ok(account)
             }
+
+            self.metrics.account_cache_misses.increment(1);
+            let account = self.state_provider.basic_account(address)?;
+
+            // Do not cache missing accounts across payloads. A speculative prewarm lookup can
+            // race with state becoming visible for the canonical parent, and persisting `None`
+            // here can later surface as false-invalid empty-account semantics.
+            if let Some(account) = account {
+                self.caches.insert_account(*address, Some(account));
+                return Ok(Some(account))
+            }
+
+            Ok(None)
         } else if let Some(account) = self.caches.0.account_cache.get(address) {
             self.metrics.account_cache_hits.increment(1);
             Ok(account)
@@ -884,6 +896,23 @@ mod tests {
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), None);
+    }
+
+    #[test]
+    fn test_prewarm_does_not_cache_missing_account_results() {
+        let address = Address::random();
+        let provider = MockEthProvider::default();
+        let caches = ExecutionCache::new(1000);
+        let state_provider =
+            CachedStateProvider::new_prewarm(provider.clone(), caches, CachedStateMetrics::zeroed());
+
+        let first = state_provider.basic_account(&address).unwrap();
+        assert!(first.is_none());
+
+        provider.add_account(address, ExtendedAccount::new(6795, U256::from(1_000_000u64)));
+
+        let second = state_provider.basic_account(&address).unwrap();
+        assert_eq!(second.map(|account| account.nonce), Some(6795));
     }
 
     #[test]
