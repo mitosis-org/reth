@@ -309,10 +309,10 @@ impl<S: AccountReader, const PREWARM: bool> AccountReader for CachedStateProvide
             // sequential execution path.
             self.metrics.account_cache_misses.increment(1);
             self.state_provider.basic_account(address)
-        } else if let Some(account) = self.caches.0.account_cache.get(address) {
-            self.metrics.account_cache_hits.increment(1);
-            Ok(account)
         } else {
+            // Shared account cache reuse is disabled for correctness. False-invalid payloads have
+            // consistently manifested as empty-account semantics (nonce/balance = 0), while code
+            // and storage reuse remain useful and lower-risk.
             self.metrics.account_cache_misses.increment(1);
             self.state_provider.basic_account(address)
         }
@@ -919,6 +919,22 @@ mod tests {
         let account = state_provider.basic_account(&address).unwrap().unwrap();
         assert_eq!(account.nonce, 7);
         assert_eq!(account.balance, U256::from(1_000_000u64));
+    }
+
+    #[test]
+    fn test_execution_ignores_stale_shared_account_cache() {
+        let address = Address::random();
+        let provider = MockEthProvider::default();
+        provider.add_account(address, ExtendedAccount::new(12428, U256::from(2_000_000u64)));
+
+        let caches = ExecutionCache::new(1000);
+        caches.insert_account(address, Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }));
+
+        let state_provider = CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
+
+        let account = state_provider.basic_account(&address).unwrap().unwrap();
+        assert_eq!(account.nonce, 12428);
+        assert_eq!(account.balance, U256::from(2_000_000u64));
     }
 
     #[test]
