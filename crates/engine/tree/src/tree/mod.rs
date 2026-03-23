@@ -1523,7 +1523,8 @@ where
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
-                                let _cache_wait = self.payload_validator.wait_for_caches();
+                                let _cache_wait =
+                                    self.payload_validator.wait_for_execution_cache();
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
                                 let num_hash = payload.num_hash();
@@ -1985,7 +1986,7 @@ where
         parent_hash: B256,
     ) -> ProviderResult<Option<B256>> {
         // Check if parent exists in side chain or in canonical chain.
-        if self.has_block_by_hash(parent_hash)? {
+        if self.sealed_header_by_hash(parent_hash)?.is_some() {
             return Ok(Some(parent_hash));
         }
 
@@ -1999,7 +2000,7 @@ where
 
             // If current_header is None, then the current_hash does not have an invalid
             // ancestor in the cache, check its presence in blockchain tree
-            if current_block.is_none() && self.has_block_by_hash(current_hash)? {
+            if current_block.is_none() && self.sealed_header_by_hash(current_hash)?.is_some() {
                 return Ok(Some(current_hash));
             }
         }
@@ -2055,7 +2056,7 @@ where
         check: B256,
         head: &SealedBlock<N::Block>,
     ) -> ProviderResult<Option<PayloadStatus>> {
-        if self.has_block_by_hash(check)? {
+        if self.sealed_header_by_hash(check)?.is_some() {
             if self.state.invalid_headers.remove(&check).is_some() {
                 debug!(
                     target: "engine::tree",
@@ -2143,7 +2144,7 @@ where
     /// Checks if the given `head` points to an invalid header, which requires a specific response
     /// to a forkchoice update.
     fn check_invalid_ancestor(&mut self, head: B256) -> ProviderResult<Option<PayloadStatus>> {
-        if self.has_block_by_hash(head)? {
+        if self.sealed_header_by_hash(head)?.is_some() {
             if self.state.invalid_headers.remove(&head).is_some() {
                 debug!(
                     target: "engine::tree",
@@ -2511,51 +2512,6 @@ where
         };
 
         Some(TreeEvent::Download(request))
-    }
-
-    /// Handles a downloaded block that was successfully inserted as valid.
-    ///
-    /// If the block matches the sync target head, returns [`TreeAction::MakeCanonical`].
-    /// If it matches a non-head sync target (safe or finalized), makes it canonical inline
-    /// and triggers a download for the remaining blocks towards the actual head.
-    /// Otherwise, tries to connect buffered blocks.
-    fn on_valid_downloaded_block(
-        &mut self,
-        block_num_hash: BlockNumHash,
-    ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
-        // check if we just inserted a block that's part of sync targets,
-        // i.e. head, safe, or finalized
-        if let Some(sync_target) = self.state.forkchoice_state_tracker.sync_target_state()
-            && sync_target.contains(block_num_hash.hash)
-        {
-            debug!(target: "engine::tree", ?sync_target, "appended downloaded sync target block");
-
-            if sync_target.head_block_hash == block_num_hash.hash {
-                // we just inserted the sync target head block, make it canonical
-                return Ok(Some(TreeEvent::TreeAction(TreeAction::MakeCanonical {
-                    sync_target_head: block_num_hash.hash,
-                })));
-            }
-
-            // This block is part of the sync target (safe or finalized) but not the
-            // head. Make it canonical and try to connect any buffered children, then
-            // continue downloading towards the actual head if needed.
-            self.make_canonical(block_num_hash.hash)?;
-            self.try_connect_buffered_blocks(block_num_hash)?;
-
-            // Check if we've reached the sync target head after connecting buffered
-            // blocks (e.g. the head block may have already been buffered).
-            if self.state.tree_state.canonical_block_hash() != sync_target.head_block_hash {
-                let target = self.lowest_buffered_ancestor_or(sync_target.head_block_hash);
-                trace!(target: "engine::tree", %target, "sync target head not yet reached, downloading head block");
-                return Ok(Some(TreeEvent::Download(DownloadRequest::single_block(target))));
-            }
-
-            return Ok(None);
-        }
-        trace!(target: "engine::tree", "appended downloaded block");
-        self.try_connect_buffered_blocks(block_num_hash)?;
-        Ok(None)
     }
     /// Invoked with a block downloaded from the network
     ///

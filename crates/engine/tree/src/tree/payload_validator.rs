@@ -1517,6 +1517,10 @@ pub trait EngineValidator<
     /// This is invoked when blocks are inserted via `InsertExecutedBlock` (e.g., locally built
     /// blocks by sequencers) to allow implementations to update internal state such as caches.
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>);
+
+    /// Waits for any shared payload-validation cache state that must not race with standard
+    /// `engine_newPayload`.
+    fn wait_for_execution_cache(&self) {}
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1579,6 +1583,10 @@ where
             block.recovered_block.block_with_parent(),
             &block.execution_output.state,
         );
+    }
+
+    fn wait_for_execution_cache(&self) {
+        self.payload_processor.wait_for_execution_cache();
     }
 }
 

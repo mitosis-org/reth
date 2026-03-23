@@ -149,6 +149,11 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
+    /// Waits until the execution cache is available for reuse.
+    pub(crate) fn wait_for_execution_cache(&self) {
+        let _ = self.execution_cache.wait_for_availability();
+    }
+
     /// Returns a reference to the workload executor driving payload tasks.
     pub const fn executor(&self) -> &Runtime {
         &self.executor
