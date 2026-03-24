@@ -10,7 +10,10 @@ use crate::tree::{
     EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
     StateProviderDatabase, TreeConfig,
 };
-use alloy_consensus::transaction::{Either, TxHashRef};
+use alloy_consensus::{
+    transaction::{Either, TxHashRef},
+    Transaction as _,
+};
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_evm::Evm;
@@ -286,11 +289,62 @@ where
         // If execution failed, we should first check if there are any header validation
         // errors that take precedence over the execution error
         let block = self.convert_to_block(input)?;
+        if let Ok(parent_state) = self.provider.state_by_block_hash(parent_block.hash()) {
+            for (idx, tx) in block.body().transactions().iter().take(3).enumerate() {
+                match tx.recover_signer() {
+                    Ok(sender) => match parent_state.basic_account(&sender) {
+                        Ok(account) => {
+                            warn!(
+                                target: "engine::tree::payload_validator",
+                                block = ?block.num_hash(),
+                                parent_hash = %parent_block.hash(),
+                                tx_index = idx,
+                                %sender,
+                                tx_nonce = tx.nonce(),
+                                parent_account_nonce = account.as_ref().map(|acc| acc.nonce),
+                                parent_account_balance = ?account.as_ref().map(|acc| acc.balance),
+                                "Execution error parent account view"
+                            );
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: "engine::tree::payload_validator",
+                                block = ?block.num_hash(),
+                                parent_hash = %parent_block.hash(),
+                                tx_index = idx,
+                                %sender,
+                                tx_nonce = tx.nonce(),
+                                %err,
+                                "Failed to inspect parent account view after execution error"
+                            );
+                        }
+                    },
+                    Err(err) => {
+                        warn!(
+                            target: "engine::tree::payload_validator",
+                            block = ?block.num_hash(),
+                            parent_hash = %parent_block.hash(),
+                            tx_index = idx,
+                            tx_nonce = tx.nonce(),
+                            %err,
+                            "Failed to recover sender while inspecting execution error"
+                        );
+                    }
+                }
+            }
+        } else {
+            warn!(
+                target: "engine::tree::payload_validator",
+                block = ?block.num_hash(),
+                parent_hash = %parent_block.hash(),
+                "Failed to build parent state provider after execution error"
+            );
+        }
 
         // Validate block consensus rules which includes header validation
         if let Err(consensus_err) = self.validate_block_inner(&block) {
             // Header validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block, consensus_err.into()).into())
+            return Err(InsertBlockError::new(block, consensus_err.into()).into());
         }
 
         // Also validate against the parent
@@ -298,7 +352,7 @@ where
             self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
         {
             // Parent validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block, consensus_err.into()).into())
+            return Err(InsertBlockError::new(block, consensus_err.into()).into());
         }
 
         // No header validation errors, return the original execution error
@@ -338,7 +392,7 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = self.convert_to_block(input)?;
-                        return Err(InsertBlockError::new(block, e.into()).into())
+                        return Err(InsertBlockError::new(block, e.into()).into());
                     }
                 }
             };
@@ -371,7 +425,7 @@ where
                 self.convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
         let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
@@ -384,7 +438,7 @@ where
                 self.convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
-            .into())
+            .into());
         };
 
         let evm_env = debug_span!(target: "engine::tree::payload_validator", "evm env")
@@ -617,7 +671,7 @@ where
                 )
                 .into(),
             )
-            .into())
+            .into());
         }
 
         if let Some(valid_block_tx) = valid_block_tx {
@@ -656,12 +710,12 @@ where
     fn validate_block_inner(&self, block: &SealedBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
-            return Err(e)
+            return Err(e);
         }
 
         if let Err(e) = self.consensus.validate_block_pre_execution(block) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
-            return Err(e)
+            return Err(e);
         }
 
         Ok(())
@@ -1073,7 +1127,7 @@ where
         trace!(target: "engine::tree::payload_validator", block=?block.num_hash(), "Validating block consensus");
         // validate block consensus rules
         if let Err(e) = self.validate_block_inner(block) {
-            return Err(e.into())
+            return Err(e.into());
         }
 
         // now validate against the parent
@@ -1082,7 +1136,7 @@ where
             self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
         {
             warn!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err(e.into())
+            return Err(e.into());
         }
         drop(_enter);
 
@@ -1095,7 +1149,7 @@ where
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            return Err(err.into());
         }
         drop(_enter);
 
@@ -1110,7 +1164,7 @@ where
         {
             // call post-block hook
             self.on_invalid_block(parent_block, block, output, None, ctx.state_mut());
-            return Err(err.into())
+            return Err(err.into());
         }
 
         // record post-execution validation duration
@@ -1216,7 +1270,7 @@ where
         // payloads under storage-v2 sync.
         if let Some(header) = self.provider.header(hash)? {
             debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)));
         }
 
         if let Some((historical, blocks)) = state.tree_state.blocks_by_hash(hash) {
@@ -1226,7 +1280,7 @@ where
                 self.provider.clone(),
                 historical,
                 Some(blocks),
-            )))
+            )));
         }
 
         debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
@@ -1258,7 +1312,7 @@ where
     ) {
         if state.invalid_headers.get(&block.hash()).is_some() {
             // we already marked this block as invalid
-            return
+            return;
         }
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }

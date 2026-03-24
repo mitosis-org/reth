@@ -81,7 +81,7 @@ use std::{
     sync::Arc,
     time::Instant,
 };
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument, trace, warn};
 
 /// Determines the commit order for database operations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1402,7 +1402,18 @@ impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
             if hashed.is_some() {
                 return Ok(hashed)
             }
-            Ok(self.tx.get_by_encoded_key::<tables::PlainAccountState>(address)?)
+            let plain = self.tx.get_by_encoded_key::<tables::PlainAccountState>(address)?;
+            if let Some(account) = plain {
+                warn!(
+                    target: "providers::database",
+                    %address,
+                    nonce = account.nonce,
+                    balance = ?account.balance,
+                    "HashedAccounts miss fell back to PlainAccountState hit"
+                );
+                return Ok(Some(account))
+            }
+            Ok(None)
         } else {
             Ok(self.tx.get_by_encoded_key::<tables::PlainAccountState>(address)?)
         }

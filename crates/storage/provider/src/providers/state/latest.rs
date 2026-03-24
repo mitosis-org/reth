@@ -19,6 +19,7 @@ use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
     DatabaseTrieWitness,
 };
+use tracing::warn;
 
 /// State provider over latest state that takes tx reference.
 ///
@@ -60,7 +61,18 @@ impl<Provider: DBProvider + StorageSettingsCache> AccountReader
             if hashed.is_some() {
                 return Ok(hashed)
             }
-            self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
+            let plain = self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?;
+            if let Some(account) = plain {
+                warn!(
+                    target: "providers::latest_state",
+                    %address,
+                    nonce = account.nonce,
+                    balance = ?account.balance,
+                    "HashedAccounts miss fell back to PlainAccountState hit"
+                );
+                return Ok(Some(account))
+            }
+            Ok(None)
         } else {
             self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
         }

@@ -31,6 +31,9 @@ use reth_trie_db::{
 };
 
 use std::fmt::Debug;
+use tracing::{debug, warn};
+
+const RECENT_NOT_YET_WRITTEN_ACCOUNT_FALLBACK_WINDOW: u64 = 2;
 
 /// Result of a history lookup for an account or storage slot.
 ///
@@ -71,10 +74,10 @@ impl HistoryInfo {
             if let (Some(_), Some(block_number)) = (lowest_available, found_block) {
                 // The key may have been written, but due to pruning we may not have changesets
                 // and history, so we need to make a changeset lookup.
-                return Self::InChangeset(block_number)
+                return Self::InChangeset(block_number);
             }
             // The key is written to, but only after our block.
-            return Self::NotYetWritten
+            return Self::NotYetWritten;
         }
 
         if let Some(block_number) = found_block {
@@ -133,17 +136,29 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
-        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
+        let info = self.provider.with_rocksdb_tx(|rocks_tx_ref| {
             let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
             reader.account_history_info(
                 address,
                 self.block_number,
                 self.lowest_available_blocks.account_history_block_number,
             )
-        })
+        })?;
+
+        debug!(
+            target: "providers::historical_state",
+            %address,
+            block_number = self.block_number,
+            ?info,
+            lowest_available = ?self.lowest_available_blocks.account_history_block_number,
+            hashed_state = self.provider.cached_storage_settings().use_hashed_state(),
+            "Resolved account history lookup"
+        );
+
+        Ok(info)
     }
 
     /// Lookup a storage key in the `StoragesHistory` table using `EitherReader`.
@@ -156,7 +171,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         let lookup_key = if self.provider.cached_storage_settings().use_hashed_state() {
@@ -250,10 +265,10 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
     where
         Provider: StorageSettingsCache,
     {
-        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
-            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
+        if !self.lowest_available_blocks.is_account_history_available(self.block_number)
+            || !self.lowest_available_blocks.is_storage_history_available(self.block_number)
         {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         if self.check_distance_against_limit(EPOCH_SLOTS)? {
@@ -273,7 +288,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
         Provider: StorageSettingsCache,
     {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
         if self.check_distance_against_limit(EPOCH_SLOTS * 10)? {
@@ -310,6 +325,12 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'_, Provi
     fn tx(&self) -> &Provider::Tx {
         self.provider.tx_ref()
     }
+
+    fn should_apply_recent_plain_fallback(&self) -> ProviderResult<bool> {
+        let tip = self.provider.last_block_number()?;
+        Ok(self.block_number <= tip
+            && tip - self.block_number <= RECENT_NOT_YET_WRITTEN_ACCOUNT_FALLBACK_WINDOW)
+    }
 }
 
 impl<
@@ -325,7 +346,29 @@ impl<
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         match self.account_history_lookup(*address)? {
-            HistoryInfo::NotYetWritten => Ok(None),
+            HistoryInfo::NotYetWritten => {
+                let plain = self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?;
+                let should_fallback = self.should_apply_recent_plain_fallback()?;
+
+                if let Some(account) = plain {
+                    warn!(
+                        target: "providers::historical_state",
+                        %address,
+                        block_number = self.block_number,
+                        tip = self.provider.last_block_number().ok(),
+                        nonce = account.nonce,
+                        balance = ?account.balance,
+                        should_fallback,
+                        "Historical account lookup returned NotYetWritten while plain state contains an account"
+                    );
+
+                    if should_fallback {
+                        return Ok(Some(account));
+                    }
+                }
+
+                Ok(None)
+            }
             HistoryInfo::InChangeset(changeset_block_number) => {
                 // Use ChangeSetReader trait method to get the account from changesets
                 self.provider
@@ -342,7 +385,7 @@ impl<
                     let hashed =
                         self.tx().get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?;
                     if hashed.is_some() {
-                        return Ok(hashed)
+                        return Ok(hashed);
                     }
                     Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
                 } else {
@@ -526,7 +569,7 @@ impl<
         hashed_storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         if !self.provider.cached_storage_settings().use_hashed_state() {
-            return Err(ProviderError::UnsupportedProvider)
+            return Err(ProviderError::UnsupportedProvider);
         }
         self.storage_by_lookup_key(address, StorageSlotKey::hashed(hashed_storage_key))
     }
@@ -687,8 +730,8 @@ where
         // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
         // short-circuit) and when it passes we save a full seek into the changeset/plain state
         // table.
-        let is_before_first_write = needs_prev_shard_check(rank, found_block, block_number) &&
-            !cursor.prev()?.is_some_and(|(k, _)| key_filter(&k));
+        let is_before_first_write = needs_prev_shard_check(rank, found_block, block_number)
+            && !cursor.prev()?.is_some_and(|(k, _)| key_filter(&k));
 
         Ok(HistoryInfo::from_lookup(
             found_block,
@@ -708,9 +751,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::needs_prev_shard_check;
+    use crate::BlockWriter;
     use crate::{
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
-        test_utils::create_test_provider_factory,
+        test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, RocksDBProviderFactory,
         StateProvider,
     };
@@ -724,7 +768,8 @@ mod tests {
     use reth_primitives_traits::{Account, StorageEntry, StorageSlotKey};
     use reth_storage_api::{
         BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        NodePrimitivesProvider, StorageChangeSetReader, StorageSettingsCache,
+        NodePrimitivesProvider, StateWriteConfig, StateWriter, StorageChangeSetReader,
+        StorageSettingsCache,
     };
     use reth_storage_errors::provider::ProviderError;
 
@@ -858,6 +903,94 @@ mod tests {
         assert!(matches!(
             HistoricalStateProviderRef::new(&db, 1000).basic_account(&HIGHER_ADDRESS),
             Ok(Some(acc)) if acc == higher_acc_plain
+        ));
+    }
+
+    #[test]
+    fn history_provider_recent_not_yet_written_can_fall_back_to_plain_account() {
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &reth_execution_types::ExecutionOutcome {
+                    first_block: 0,
+                    receipts: vec![vec![]],
+                    ..Default::default()
+                },
+                crate::OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
+        for (block, state) in &data.blocks {
+            provider_rw.insert_block(block).unwrap();
+            provider_rw
+                .write_state(state, crate::OriginalValuesKnown::No, StateWriteConfig::default())
+                .unwrap();
+        }
+
+        let acc_plain =
+            Account { nonce: 42, balance: U256::from(1_000_000u64), bytecode_hash: None };
+        provider_rw
+            .tx_ref()
+            .put::<tables::AccountsHistory>(
+                ShardedKey { key: ADDRESS, highest_block_number: u64::MAX },
+                BlockNumberList::new([5]).unwrap(),
+            )
+            .unwrap();
+        provider_rw.tx_ref().put::<tables::PlainAccountState>(ADDRESS, acc_plain).unwrap();
+        provider_rw.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 4).basic_account(&ADDRESS),
+            Ok(Some(account)) if account == acc_plain
+        ));
+    }
+
+    #[test]
+    fn history_provider_old_not_yet_written_does_not_fall_back_to_plain_account() {
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        provider_rw
+            .write_state(
+                &reth_execution_types::ExecutionOutcome {
+                    first_block: 0,
+                    receipts: vec![vec![]],
+                    ..Default::default()
+                },
+                crate::OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
+        for (block, state) in &data.blocks {
+            provider_rw.insert_block(block).unwrap();
+            provider_rw
+                .write_state(state, crate::OriginalValuesKnown::No, StateWriteConfig::default())
+                .unwrap();
+        }
+
+        let acc_plain =
+            Account { nonce: 42, balance: U256::from(1_000_000u64), bytecode_hash: None };
+        provider_rw
+            .tx_ref()
+            .put::<tables::AccountsHistory>(
+                ShardedKey { key: ADDRESS, highest_block_number: u64::MAX },
+                BlockNumberList::new([5]).unwrap(),
+            )
+            .unwrap();
+        provider_rw.tx_ref().put::<tables::PlainAccountState>(ADDRESS, acc_plain).unwrap();
+        provider_rw.commit().unwrap();
+
+        let db = factory.provider().unwrap();
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 1).basic_account(&ADDRESS),
+            Ok(None)
         ));
     }
 
