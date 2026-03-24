@@ -294,7 +294,7 @@ where
                 match tx.recover_signer() {
                     Ok(sender) => match parent_state.basic_account(&sender) {
                         Ok(account) => {
-                            warn!(
+                            info!(
                                 target: "engine::tree::payload_validator",
                                 block = ?block.num_hash(),
                                 parent_hash = %parent_block.hash(),
@@ -307,7 +307,7 @@ where
                             );
                         }
                         Err(err) => {
-                            warn!(
+                            info!(
                                 target: "engine::tree::payload_validator",
                                 block = ?block.num_hash(),
                                 parent_hash = %parent_block.hash(),
@@ -320,7 +320,7 @@ where
                         }
                     },
                     Err(err) => {
-                        warn!(
+                        info!(
                             target: "engine::tree::payload_validator",
                             block = ?block.num_hash(),
                             parent_hash = %parent_block.hash(),
@@ -333,7 +333,7 @@ where
                 }
             }
         } else {
-            warn!(
+            info!(
                 target: "engine::tree::payload_validator",
                 block = ?block.num_hash(),
                 parent_hash = %parent_block.hash(),

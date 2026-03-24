@@ -31,7 +31,7 @@ use reth_trie_db::{
 };
 
 use std::fmt::Debug;
-use tracing::{debug, warn};
+use tracing::{info, warn};
 
 const RECENT_NOT_YET_WRITTEN_ACCOUNT_FALLBACK_WINDOW: u64 = 2;
 
@@ -148,7 +148,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + StorageChangeSetReader + Block
             )
         })?;
 
-        debug!(
+        info!(
             target: "providers::historical_state",
             %address,
             block_number = self.block_number,

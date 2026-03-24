@@ -38,6 +38,7 @@ use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
 };
+use tracing::info;
 use tracing::trace;
 
 /// Type that interacts with a snapshot view of the blockchain (storage and in-memory) at time of
@@ -599,7 +600,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         M: Fn(&BlockState<N::Primitives>) -> ProviderResult<R>,
     {
         if let Some(Some(block_state)) = self.head_block.as_ref().map(|b| b.block_on_chain(id)) {
-            trace!(
+            info!(
                 target: "providers::blockchain",
                 ?id,
                 anchor = ?block_state.anchor().hash,
@@ -608,7 +609,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             );
             return fetch_from_block_state(block_state)
         }
-        trace!(target: "providers::blockchain", ?id, "Using database-backed provider");
+        info!(target: "providers::blockchain", ?id, "Using database-backed provider");
         fetch_from_db(&self.storage_provider)
     }
 
@@ -628,7 +629,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
         {
             let anchor_hash = block_state.anchor().hash;
-            trace!(
+            info!(
                 target: "providers::blockchain",
                 %block_hash,
                 %anchor_hash,
@@ -638,7 +639,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             let latest_historical = into_history_at_block_hash(anchor_hash)?;
             return Ok(Box::new(block_state.state_provider(latest_historical)));
         }
-        trace!(target: "providers::blockchain", %block_hash, "Building state provider from database history");
+        info!(target: "providers::blockchain", %block_hash, "Building state provider from database history");
         into_history_at_block_hash(block_hash)
     }
 }
