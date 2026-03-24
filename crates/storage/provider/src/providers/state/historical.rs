@@ -339,7 +339,12 @@ impl<
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                 if self.provider.cached_storage_settings().use_hashed_state() {
                     let hashed_address = alloy_primitives::keccak256(address);
-                    Ok(self.tx().get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?)
+                    let hashed =
+                        self.tx().get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?;
+                    if hashed.is_some() {
+                        return Ok(hashed)
+                    }
+                    Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
                 } else {
                     Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
                 }

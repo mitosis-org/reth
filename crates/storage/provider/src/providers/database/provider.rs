@@ -1398,7 +1398,11 @@ impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.cached_storage_settings().use_hashed_state() {
             let hashed_address = keccak256(address);
-            Ok(self.tx.get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?)
+            let hashed = self.tx.get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?;
+            if hashed.is_some() {
+                return Ok(hashed)
+            }
+            Ok(self.tx.get_by_encoded_key::<tables::PlainAccountState>(address)?)
         } else {
             Ok(self.tx.get_by_encoded_key::<tables::PlainAccountState>(address)?)
         }

@@ -56,9 +56,11 @@ impl<Provider: DBProvider + StorageSettingsCache> AccountReader
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if self.0.cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
-            self.tx()
-                .get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)
-                .map_err(Into::into)
+            let hashed = self.tx().get_by_encoded_key::<tables::HashedAccounts>(&hashed_address)?;
+            if hashed.is_some() {
+                return Ok(hashed)
+            }
+            self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
         } else {
             self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
         }
